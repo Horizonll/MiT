@@ -52,31 +52,26 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim**-0.5
-        self.q = nn.Linear(dim, dim, bias=qkv_bias)
-        self.kv = nn.Linear(dim, dim * 2, bias=qkv_bias)
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
         self.positional_encoding = nn.Parameter(torch.zeros(size=(1, num_patches, dim)))
+        trunc_normal_(self.positional_encoding, std=0.02)
 
     def forward(self, x):
-        B, N, C = x.shape
+        B_, N, C = x.shape
         x = x + self.positional_encoding
-        q = (
-            self.q(x)
-            .reshape(B, N, self.num_heads, C // self.num_heads)
-            .permute(0, 2, 1, 3)
-        )
-        kv = (
-            self.kv(x)
-            .reshape(B, -1, 2, self.num_heads, C // self.num_heads)
+        qkv = (
+            self.qkv(x)
+            .reshape(B_, N, 3, self.num_heads, C // self.num_heads)
             .permute(2, 0, 3, 1, 4)
         )
-        k, v = kv[0], kv[1]
+        q, k, v = qkv[0], qkv[1], qkv[2]
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -125,6 +120,12 @@ class Block(nn.Module):
 
 
 class MixBlock(nn.Module):
+    """
+    mix attention block that contains two consecutive attention layers
+    1st attention layer is applied along the tokens
+    2nd attention layer is applied along the feature dimensions
+    """
+
     def __init__(
         self,
         dim,
@@ -204,12 +205,13 @@ class MixVisionTransformer(nn.Module):
             patch_size=patch_size,
             in_chans=in_chans,
             embed_dim=embed_dim,
+            norm_layer=norm_layer,
         )
         num_patches = self.patch_embed.num_patches
         self.pos_drop = nn.Dropout(p=drop_rate)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
-        depth = depth // 2  # because each block has two attention layers
-        self.blocks = nn.ModuleList(
+        depth = depth // 2
+        self.layers = nn.ModuleList(
             [
                 MixBlock(
                     dim=embed_dim,
@@ -228,19 +230,15 @@ class MixVisionTransformer(nn.Module):
             ]
         )
         self.norm = norm_layer(embed_dim)
-
-        # Classifier head
         self.head = (
             nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         )
-
-        trunc_normal_(self.head.weight, std=0.02)
         self.apply(self._init_weights)
 
     def forward(self, x):
         x = self.patch_embed(x)
         x = self.pos_drop(x)
-        for blk in self.blocks:
+        for blk in self.layers:
             x = blk(x)
         x = x.mean(dim=1)
         x = self.head(x)
@@ -266,23 +264,51 @@ class MixVisionTransformer(nn.Module):
 
 
 class PatchEmbed(nn.Module):
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
+    r"""Image to Patch Embedding
+
+    Args:
+        img_size (int): Image size.  Default: 224.
+        patch_size (int): Patch token size. Default: 4.
+        in_chans (int): Number of input image channels. Default: 3.
+        embed_dim (int): Number of linear projection output channels. Default: 96.
+        norm_layer (nn.Module, optional): Normalization layer. Default: None
+    """
+
+    def __init__(
+        self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, norm_layer=None
+    ):
         super().__init__()
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
-
+        patches_resolution = [
+            img_size[0] // patch_size[0],
+            img_size[1] // patch_size[1],
+        ]
         self.img_size = img_size
         self.patch_size = patch_size
-        self.H, self.W = img_size[0] // patch_size[0], img_size[1] // patch_size[1]
-        self.num_patches = self.H * self.W
+        self.patches_resolution = patches_resolution
+        self.num_patches = patches_resolution[0] * patches_resolution[1]
+
+        self.in_chans = in_chans
+        self.embed_dim = embed_dim
+
         self.proj = nn.Conv2d(
             in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
         )
-        self.norm = nn.LayerNorm(embed_dim)
+        if norm_layer is not None:
+            self.norm = norm_layer(embed_dim)
+        else:
+            self.norm = None
 
     def forward(self, x):
-        x = self.proj(x).flatten(2).transpose(1, 2)
-        x = self.norm(x)
+        B, C, H, W = x.shape
+        # FIXME look at relaxing size constraints
+        assert (
+            H == self.img_size[0] and W == self.img_size[1]
+        ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        x = self.proj(x).flatten(2).transpose(1, 2)  # B Ph*Pw C
+        if self.norm is not None:
+            x = self.norm(x)
         return x
 
 
