@@ -264,18 +264,8 @@ class MixVisionTransformer(nn.Module):
 
 
 class PatchEmbed(nn.Module):
-    r"""Image to Patch Embedding
-
-    Args:
-        img_size (int): Image size.  Default: 224.
-        patch_size (int): Patch token size. Default: 4.
-        in_chans (int): Number of input image channels. Default: 3.
-        embed_dim (int): Number of linear projection output channels. Default: 96.
-        norm_layer (nn.Module, optional): Normalization layer. Default: None
-    """
-
     def __init__(
-        self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, norm_layer=None
+        self, img_size=224, patch_size=16, in_chans=3, embed_dim=None, norm_layer=None
     ):
         super().__init__()
         img_size = to_2tuple(img_size)
@@ -288,7 +278,8 @@ class PatchEmbed(nn.Module):
         self.patch_size = patch_size
         self.patches_resolution = patches_resolution
         self.num_patches = patches_resolution[0] * patches_resolution[1]
-
+        if embed_dim is None:
+            embed_dim = in_chans * patch_size[0] * patch_size[1]
         self.in_chans = in_chans
         self.embed_dim = embed_dim
 
@@ -314,10 +305,10 @@ class PatchEmbed(nn.Module):
 
 def mit_small(**kwargs):
     model = MixVisionTransformer(
-        patch_size=16,
-        embed_dim=768,
+        patch_size=14,
+        # embed_dim=588,
         depth=12,
-        num_heads=[12, 4],
+        num_heads=[12, 8],
         mlp_ratio=4.0,
         qkv_bias=True,
         qk_scale=None,
