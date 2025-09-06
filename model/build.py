@@ -9,7 +9,6 @@ def build_model(config):
             in_chans=config.MODEL.SWIN.IN_CHANS,
             num_classes=config.MODEL.NUM_CLASSES,
             drop_rate=config.MODEL.DROP_RATE,
-            attn_drop_rate=config.MODEL.ATTN_DROP_RATE,
             drop_path_rate=config.MODEL.DROP_PATH_RATE,
         )
     else:
