@@ -101,7 +101,7 @@ def parse_option():
 
 
 def main():
-    os.environ["NCCL_BLOCKING_WAIT"] = "1"
+    os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
     args, config = parse_option()
 
     rank = int(os.environ["RANK"])

@@ -56,12 +56,10 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.positional_encoding = nn.Parameter(torch.zeros(size=(1, num_patches, dim)))
-        trunc_normal_(self.positional_encoding, std=0.02)
-
+        
+ 
     def forward(self, x):
         B_, N, C = x.shape
-        x = x + self.positional_encoding
         qkv = (
             self.qkv(x)
             .reshape(B_, N, 3, self.num_heads, C // self.num_heads)
@@ -227,6 +225,8 @@ class MixVisionTransformer(nn.Module):
                 for i in range(depth)
             ]
         )
+        self.positional_encoding = nn.Parameter(torch.zeros(size=(1, num_patches, embed_dim)))
+        trunc_normal_(self.positional_encoding, std=0.02)
         self.norm = norm_layer(embed_dim)
         self.head = (
             nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
@@ -235,6 +235,7 @@ class MixVisionTransformer(nn.Module):
 
     def forward(self, x):
         x = self.patch_embed(x)
+        x = x + self.positional_encoding
         x = self.pos_drop(x)
         for blk in self.layers:
             x = blk(x)
@@ -303,10 +304,10 @@ class PatchEmbed(nn.Module):
 
 def mit_small(**kwargs):
     model = MixVisionTransformer(
-        patch_size=14,
-        # embed_dim=588,
+        patch_size=16,
+        embed_dim=256,
         depth=12,
-        num_heads=[12, 8],
+        num_heads=[4, 4],
         mlp_ratio=4.0,
         qkv_bias=True,
         qk_scale=None,
